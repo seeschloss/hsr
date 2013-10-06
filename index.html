@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>High Speed Rail.</title>
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:site" content="@badaseong" />
+
+<meta property="og:site_name" content="Ssz.fr">
+<meta property="og:url" content="https://ssz.fr/hsr">
+<meta property="og:title" content="Taiwan High Speed Rail" />
+<meta property="og:image" content="http://ssz.fr/hsr/hsr.png" />
+<meta property="og:image:height" content="695" />
+<meta property="og:image:width"  content="695" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:locale" content="en" />
+<meta property="og:description" content="Realtime position of trains on Taiwan HSR line." />
+<meta name="description"        content="Realtime position of trains on Taiwan HSR line." />
+<meta charset="utf-8">
+<style>
+
+body {
+	background-color: #ABCDEF;
+}
+
+svg, #labels {
+	position: absolute;
+	top: 0;
+	left: 0;
+}
+
+.land {
+	fill: white;
+	stroke: grey;
+	stroke-width: 1px;
+}
+.land-shadow {
+	fill: white;
+	stroke: lightgrey;
+	stroke-width: 4px;
+}
+
+.line {
+	fill: none;
+	stroke: #C35617;
+	stroke-width: 15px;
+	stroke-linecap: round;
+}
+.line-shadow {
+	fill: none;
+	stroke: grey;
+	stroke-width: 17px;
+	stroke-linecap: round;
+}
+
+.train-position {
+	fill: none;
+	stroke-width: 6px;
+	stroke-linecap: round;
+}
+.train-position.shadow.south, .train-position.shadow.north {
+	fill: none;
+	stroke-width: 7px;
+	stroke-linecap: round;
+	stroke: black;
+}
+
+.train-position.south {
+	stroke: #ACFFAC;
+}
+
+.train-position.north {
+	stroke: #9DDFFF;
+}
+
+.hidden {
+	display: none;
+}
+
+#labels span {
+	position: absolute;
+	background-color: white;
+	box-shadow: 0 0 4px black;
+	border-radius: 4px;
+	padding: 2px;
+}
+.station.zh {
+	margin-left: -1.6em;
+	margin-top: -2.6em;
+}
+.station.zh.taipei {
+	margin-left: 0;
+	margin-top: -3.1em;
+}
+.station.zh.banqiao {
+	margin-left: -1.2em;
+	margin-top: -3em;
+}
+.station.zh.zuoying {
+	margin-top: 0;
+}
+
+.station.en {
+	margin-left: 1ex;
+}
+.station.en.taoyuan {
+	margin-top: 6px;
+	margin-left: -8px;
+}
+.station.en.banqiao {
+	margin-top: 6px;
+}
+.station.en.taipei {
+	margin-left: 1.5em;
+	margin-top: -2em;
+}
+
+#time {
+	width: 20em;
+	text-align: center;
+	position: fixed;
+	z-index: 1000;
+	font-family: 微軟正黑體, arial, sans-serif;
+}
+
+#time a {
+	font-size: 120%;
+	color: #777;
+	text-decoration: none;
+}
+
+#time a:hover {
+	color: black;
+	text-decoration: underline;
+}
+
+#time .contact {
+	font-style: normal;
+	font-size: 80%;
+}
+
+</style>
+<body>
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script src="http://d3js.org/topojson.v1.min.js"></script>
+<script>
+
+var stations = {
+	taipei: {
+		en: 'Taipei',
+		zh: '台北',
+		location: [121.517222, 25.047778],
+		location_schema: [122.00, 25.12],
+		position: 0.00
+	},
+	banqiao: {
+		en: 'Banqiao',
+		zh: '板橋',
+		location: [121.463675, 25.014281],
+		location_schema: [121.80, 24.12],
+		position: 0.04
+	},
+	taoyuan: {
+		en: 'Taoyuan',
+		zh: '桃園',
+		location: [121.21475, 25.013031],
+		location_schema: [121.60, 25.12],
+		position: 0.12
+	},
+	hsinchu: {
+		en: 'Hsinchu',
+		zh: '新竹',
+		location: [121.040239, 24.808433],
+		location_schema: [121.40, 23.12],
+		position: 0.21
+	},
+	taichung: {
+		en: 'Taichung',
+		zh: '台中',
+		location: [120.615925, 24.111719],
+		location_schema: [121.00, 24.62],
+		position: 0.47
+	},
+	chiayi: {
+		en: 'Chiayi',
+		zh: '嘉義',
+		location: [120.323736, 23.459183],
+		location_schema: [120.80, 22.72],
+		position: 0.72
+	},
+	tainan: {
+		en: 'Tainan',
+		zh: '台南',
+		location: [120.285767, 22.924742],
+		location_schema: [120.60, 23.72],
+		position: 0.90
+	},
+	zuoying: {
+		en: 'Zuoying',
+		zh: '左營',
+		location: [120.307481, 22.687389],
+		location_schema: [120.40, 23.22],
+		position: 1.00
+	},
+};
+
+var width = 800,
+	height = 800;
+
+var projection = d3.geo.mercator()
+	.scale((height + 1) / 2 / Math.PI * 90)
+	.translate([width / 2, height / 2])
+	.center([120.1, 23.6])
+	.precision(.1);
+
+var path = d3.geo.path()
+	.projection(projection);
+
+var svg = d3.select("body").append("svg")
+	.attr("width", width)
+	.attr("height", height);
+
+var labels = d3.select("body").append("div")
+	.attr("id", "labels");
+
+var svg_trains = d3.select("body").append("svg")
+	.attr("class", "trains")
+	.attr("width", width)
+	.attr("height", height);
+
+var p = projection([120.8, 23.9]);
+var time = labels.append("span")
+	.attr("id", "time")
+	.attr("style", "left: " + p[0] + "px; top: " + p[1] + "px;");
+
+var line = d3.svg.line()
+	.interpolate('cardinal');
+
+function build_rail(schema) {
+	for (var id in stations) {
+		var station = stations[id];
+		station.projected = projection(schema && station.location_schema ? station.location_schema : station.location);
+	}
+
+	if (schema) {
+		var p = projection([118.8, 25.2]);
+
+		land = svg.selectAll(".land")
+			.transition().duration(1000)
+			.style("opacity", 0);
+
+		svg.selectAll(".land-shadow")
+			.transition().duration(1000)
+			.style("opacity", 0);
+	} else {
+		var p = projection([120.8, 23.9]);
+
+		svg.selectAll(".land")
+			.transition().duration(1000)
+			.style("opacity", 1);
+
+		svg.selectAll(".land-shadow")
+			.transition().duration(1000)
+			.style("opacity", 1);
+	}
+	var time = labels.selectAll("#time")
+		.transition().duration(1000)
+		.attr("style", "left: " + p[0] + "px; top: " + p[1] + "px;");
+
+	var shadow = svg.selectAll(".line-shadow")
+		.data([d3.map(stations).values().map(function(d) {return d.projected})]);
+	
+	shadow.enter()
+		.append("path")
+		.attr("class", "line-shadow");
+
+	shadow
+		.transition().duration(1000)
+		.attr("d", line);
+
+	var rail = svg.selectAll(".line")
+		.data([d3.map(stations).values().map(function(d) {return d.projected})]);
+	
+	rail.enter()
+		.append("path")
+		.attr("class", "line");
+
+	rail
+		.transition().duration(1000)
+		.attr("d", line);
+
+	var station_points = svg.selectAll(".station")
+		.data(d3.map(stations).values());
+
+	station_points.enter()
+		.append("circle")
+		.attr("class", "station")
+		.attr("r", 4);
+
+	station_points
+		.transition().duration(1000)
+		.attr("cx", function(d) { return d.projected[0]; })
+		.attr("cy", function(d) { return d.projected[1]; });
+
+	var station_labels_en = labels.selectAll(".station.en")
+		.data(d3.map(stations).values());
+
+	station_labels_en.enter()
+		.append("span")
+		.attr("class", function(d, i) { return "station en " + d3.map(stations).keys()[i]; })
+		.text(function(d) { return d.en; });
+
+	station_labels_en
+		.transition().duration(1000)
+		.attr("style", function(d) { return "left: " + d.projected[0] + "px; top: " + d.projected[1] + "px;"; });
+
+	var station_labels_zh = labels.selectAll(".station.zh")
+		.data(d3.map(stations).values());
+
+	station_labels_zh.enter()
+		.append("span")
+		.attr("class", function(d, i) { return "station zh " + d3.map(stations).keys()[i]; })
+		.text(function(d) { return d.zh; });
+
+	station_labels_zh
+		.transition().duration(1000)
+		.attr("style", function(d) { return "left: " + d.projected[0] + "px; top: " + d.projected[1] + "px;"; });
+
+	return rail;
+}
+
+d3.json("borders.json", function(error, borders) {
+	svg.insert("path", ".graticule")
+		.datum(borders)
+		.attr("class", "land-shadow")
+		.attr("d", path);
+
+	svg.insert("path", ".graticule")
+		.datum(borders)
+		.attr("class", "land")
+		.attr("d", path);
+
+	var rail = build_rail();
+
+	function Train(def) {
+		this.definition = def;
+		this.number = def.train;
+		this.direction = def.direction;
+		this.days = {1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7:false};
+		var that = this; // What a wonderful world...
+		def.days.split(/,/).forEach(function(day) { day = +day.replace(/ */, ''); that.days[day] = true; });
+
+		this.build_timetable();
+
+		this.line2 = svg_trains.append("path")
+			.datum(d3.map(stations).values().map(function(d) {return d.projected}))
+			.attr("class", "train-position shadow hidden")
+			.attr("d", line);
+
+		this.point2 = svg_trains.append("circle")
+			.attr("class", "train-position shadow hidden")
+			.attr('r', 1.2)
+
+		this.line = svg_trains.append("path")
+			.datum(d3.map(stations).values().map(function(d) {return d.projected}))
+			.attr("class", "train-position hidden")
+			.attr("d", line);
+
+		this.point = svg_trains.append("circle")
+			.attr("class", "train-position hidden")
+			.attr('r', 1.1)
+
+		this.point.append("title")
+			.text(this.number);
+	}
+
+	Train.prototype.build_timetable = function() {
+		this.timetable = {};
+		for (var station in stations) {
+			this.timetable[station] = this.definition[station];
+		}
+
+		var date = new Date();
+		var w = date.getUTCDay() + 6;
+		if (date.getUTCHours() > 16) { w++; }
+		var weekday = (w % 7) + 1;
+
+		var times = [];
+		var stops = [];
+		for (var station in this.timetable) {
+			if (!this.timetable[station] || !this.days[weekday]) {
+				continue;
+			}
+			var d = this.timetable[station].split(/:/);
+
+			if (d.length == 2) {
+				var h = d[0];
+				var m = d[1];
+
+				var month = date.getUTCMonth() + 1;
+				if (month < 10) { month = "0" + month; };
+				var day = date.getUTCDate();
+				if (date.getUTCHours() > 16) { day++; }
+				if (day < 10) { day = "0" + day; };
+				var str = date.getUTCFullYear() + "-" + month + "-" + day + "T" + h + ":" + m + ":00+0800";
+				// All this is so ugly... yuck.
+
+				stops.push(stations[station].position);
+				times.push(Date.parse(str));
+			}
+		}
+
+		this.scale = d3.scale.linear()
+			.domain(times)
+			.range(stops);
+	};
+
+	Train.prototype.update = function(time) {
+		var date = new Date(time);
+		var w = date.getDay() + 6;
+		if (date.getUTCHours() > 16) { w++; }
+		var weekday = (w % 7) + 1;
+		if (!this.days[weekday]) {
+			this.point.attr('class', 'train-position hidden');
+			this.line.attr('class', 'train-position hidden');
+			return;
+		}
+
+		var pos = this.scale(time);
+
+		if (pos > 1 || pos < 0) {
+			this.point.attr('class', 'train-position hidden');
+			this.line.attr('class', 'train-position hidden');
+			this.point2.attr('class', 'train-position shadow hidden');
+			this.line2.attr('class', 'train-position shadow hidden');
+		} else {
+			var length = rail[0][0].getTotalLength();
+			var position = pos * length;
+			var point = rail[0][0].getPointAtLength(position);
+			var that = this;
+			this.point
+				.attr('class', function(d) { return 'train-position ' + that.direction })
+				.attr('cx', point.x)
+				.attr('cy', point.y);
+
+			this.point2
+				.attr('class', function(d) { return 'train-position shadow ' + that.direction })
+				.attr('cx', point.x)
+				.attr('cy', point.y);
+
+			var p1 = [point.x, point.y];
+			var point2 = rail[0][0].getPointAtLength(position + 7 * (this.direction == 'south' ? 1 : -1));
+			var p2 = [point2.x, point2.y];
+
+			this.line
+				.attr('class', function(d) {return 'train-position ' + that.direction;})
+				.datum([p1, p2])
+				.attr("d", line);
+
+			this.line2
+				.attr('class', function(d) {return 'train-position shadow ' + that.direction;})
+				.datum([p1, p2])
+				.attr("d", line);
+		}
+	};
+
+	trains = [];
+	d3.tsv("timetable.tsv", function(error, timetable) {
+		timetable.forEach(function(traindef) {
+			trains.push(new Train(traindef));
+		});
+
+		update_trains();
+		setInterval(update_trains, 1000);
+		setInterval(update_timetables, 60000);
+	});
+
+	function update_trains() {
+		var str = (new Date()).toString();
+		str += "<br /><br />";
+		str += "<a href='http://www.thsrc.com.tw/'>台灣高鐵 Taiwan High Speed Rail</a><br /><br />";
+		str += "這是目前高鐵所有火車的所在位置，準確度會受您電腦的時間設定影響。<br /><br />" +
+			"Theoretical current train positions according to HSR timetable, updated in realtime. " +
+			"Accuracy depends on your own computer's clock being correctly set.<br /><br />" +
+			"<i class='contact'><a href='mailto:see@seos.fr'>contact</a> // <a href='//ssz.fr/'>home</a></i>";
+		time.html(str);
+		trains.forEach(function(train) {
+			var now = Date.now();
+			train.update(now);
+		});
+	}
+
+	function update_timetables() {
+		trains.forEach(function(train) {
+			train.build_timetable();
+		});
+	}
+});
+
+</script>
+</body>
+</html>
